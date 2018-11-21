@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package calculate;
+
+service Calculate_ {
+    rpc numberAdd (CalculateInt) returns (Number_) {}
+    rpc numberMul (CalculateInt) returns (Number_) {}
+    rpc stringAdd (CalculateString) returns (String_) {}
+}
+
+message Number_ {
+    int64 num  = 1;
+}
+
+message String_ {
+    string str = 1;
+}
+
+message CalculateInt {
+    Number_ a = 1;
+    Number_ b = 2;
+}
+
+message CalculateString {
+    String_ a = 1;
+    String_ b = 2;
+}
+

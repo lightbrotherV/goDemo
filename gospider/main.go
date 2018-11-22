@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strconv"
 	"sync"
 
 	"github.com/PuerkitoBio/goquery"
@@ -81,8 +82,8 @@ func main() {
 	search("http://blockgeek.org/latest?no_definitions=true&no_subcategories=false&page=0", func(dom *goquery.Document) {
 		dom.Find(".topic-list-item").Each(func(i int, subDom *goquery.Selection) {
 			//获取每个帖子的时间戳
-			timestamp, ok := subDom.Find("td .post-activity .relative-date").Attr("data-time")
-
+			timestampstr, _ := subDom.Find("td .post-activity .relative-date").Attr("data-time")
+			timestamp, _ := strconv.Atoi(timestampstr)
 		})
 	})
 }

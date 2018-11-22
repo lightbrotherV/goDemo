@@ -30,9 +30,9 @@ func (*server) StringAdd(ctx context.Context, in *pb.CalculateString) (*pb.Strin
 	return &pb.String_{Str: res}, nil
 }
 
-func main() {
-	//创建tcp监听进程，用于接受客户端连接
-	lis, err := net.Listen("tcp", "5198")
+func startServer() {
+	//创建tcp者，用于接受客户端连接
+	lis, err := net.Listen("tcp", "0.0.0.0:8848")
 
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
@@ -44,4 +44,12 @@ func main() {
 	// 反射grpc服务，在测试是有用，此处可注释
 	reflection.Register(grpcServer)
 
+	//将监听者注入到grpc服务器中,并启动服务器
+	if err := grpcServer.Serve(lis); err != nil {
+		log.Fatalf("failed to serve: %v", err)
+	}
+}
+
+func main() {
+	startServer()
 }

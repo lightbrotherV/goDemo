@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"crypto/md5"
 	"encoding/hex"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 )
@@ -18,9 +20,11 @@ const (
 	phantomjspath = "./phantomjs"
 )
 
-var result map[int]map[string]string //保存最终数据
+var result map[string]map[string]string //保存最终数据
 
 var wg sync.WaitGroup //定义一个同步等待的组
+
+var searchDay int = 7
 
 //md5加密
 func md5Encode(code string) string {
@@ -79,11 +83,28 @@ func search(url string, domDeal func(*goquery.Document)) {
 }
 
 func main() {
+	//获取待搜查帖子的时间戳
+	futureStamp := time.Now().Unix() - int64(3600*24*searchDay)
+	result = make(map[string]map[string]string)
 	search("http://blockgeek.org/latest?no_definitions=true&no_subcategories=false&page=0", func(dom *goquery.Document) {
+
 		dom.Find(".topic-list-item").Each(func(i int, subDom *goquery.Selection) {
 			//获取每个帖子的时间戳
-			timestampstr, _ := subDom.Find("td .post-activity .relative-date").Attr("data-time")
-			timestamp, _ := strconv.Atoi(timestampstr)
+			invitationTimeStr, _ := subDom.Find("td .post-activity .relative-date").Attr("data-time")
+			invitationTimestamp, _ := strconv.Atoi(invitationTimeStr)
+			//是7天前的帖子
+			if int64(invitationTimestamp/1000) > futureStamp {
+				// //帖子id
+				invitationId, _ := subDom.Attr("data-topic-id")
+				// //帖子标题
+				if result[invitationId] == nil {
+					result[invitationId] = make(map[string]string)
+				}
+				result[invitationId]["title"] = subDom.Find("td .link-top-line .title").Text()
+				result[invitationId]["category"] = subDom.Find(".category .category-name").Text()
+				result[invitationId]["time"] = time.Unix(int64(invitationTimestamp/1000), 0).Format("2006-01-02 15:04:05")
+				fmt.Println(result[invitationId]["time"])
+			}
 		})
 	})
 }

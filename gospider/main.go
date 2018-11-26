@@ -7,13 +7,15 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"strconv"
 	"sync"
 	"time"
 
-	"github.com/360EntSecGroup-Skylar/excelize"
+	"github.com/lightbrotherV/lightGoJson"
+
 	"github.com/PuerkitoBio/goquery"
 )
 
@@ -21,13 +23,15 @@ const (
 	phantomjspath = "./phantomjs"
 )
 
-var result map[string][]string //保存最终数据
+var result map[string][]string //保存帖子数据
+
+var userResult map[string]map[string]string //保持用户数据
 
 var wg sync.WaitGroup //定义一个同步等待的组
 
 var searchDay int = 7
 
-var futureStamp, nowStamp int64 //待搜查以及现在的时间戳
+var pastStamp, nowStamp int64 //待搜查以及现在的时间戳
 
 //md5加密
 func md5Encode(code string) string {
@@ -86,66 +90,85 @@ func search(url string, domDeal func(*goquery.Document)) {
 	os.Remove(url)
 }
 
-//将获取数据存入xlsx表中
-func saveToExecl(data map[string][]string) {
-	var alphabet []string
-	for i := 'A'; i <= 'Z'; i++ {
-		alphabet = append(alphabet, string(i))
+//获取帖子列表
+func getInvitation(seachUrl string, i int) {
+	search(seachUrl, func(dom *goquery.Document) {
+		resultIndex := 0
+		dom.Find(".topic-list-item").Each(func(i int, subDom *goquery.Selection) {
+			//获取每个帖子的时间戳
+			invitationTimeStr, _ := subDom.Find("td .post-activity .relative-date").Attr("data-time")
+			invitationTimestamp, _ := strconv.Atoi(invitationTimeStr)
+			//是7天前的帖子
+			if int64(invitationTimestamp/1000) > pastStamp {
+				//帖子id
+				invitationId, _ := subDom.Attr("data-topic-id")
+				//帖子标题
+				if result[invitationId] == nil {
+					result[invitationId] = make([]string, 1000)
+				}
+				result[invitationId][resultIndex] = subDom.Find("td .link-top-line .title").Text() //帖子名字
+				resultIndex++
+				result[invitationId][resultIndex] = subDom.Find(".category .category-name").Text() //帖子分类
+				resultIndex++
+				result[invitationId][resultIndex] = time.Unix(int64(invitationTimestamp/1000), 0).Format("2006-01-02 15:04:05") //发布时间
+				resultIndex++
+				result[invitationId][resultIndex] = "http://blockgeek.org/t/topic/" + invitationId
+				resultIndex++
+				wg.Add(1)
+				go getInvitationInfo(invitationId)
+			}
+		})
+	})
+}
+
+//获取帖子用户名字
+func getInvitationInfo(invitationId string) {
+	//帖子信息
+	search("http://blockgeek.org/t/topic/"+invitationId, func(dom *goquery.Document) {
+		var username string
+		dom.Find(".post-stream .topic-post").Each(func(i int, subDom *goquery.Selection) {
+			username = subDom.Find(".username a").Text()
+			wg.Add(1)
+			go getUserInfo(username, invitationId)
+		})
+	})
+}
+
+//根据用户英文名查询用户信息
+func getUserInfo(username string, invitationId string) {
+	defer wg.Done()
+	resp, err := http.Get(fmt.Sprintf("http://blockgeek.org/u/%s.json", username))
+	if err != nil {
+		log.Fatal(err)
 	}
-	hang := 1
-	line := 0
-	xlsx := excelize.NewFile()
-	title := map[string]string{"A1": "标题", "B1": "分类", "C1": "发帖时间", "D1": "作者（英文）", "E1": "作者（中文）", "F1": "文章链接"}
-	for k, v := range title {
-		xlsx.SetCellValue("Sheet1", k, v)
+	if resp.StatusCode != http.StatusOK {
+		log.Fatal(resp.StatusCode)
 	}
-	for _, v1 := range data {
-		line = 0
-		hang++
-		for _, v2 := range v1 {
-			lineName := alphabet[line]
-			xlsx.SetCellValue("Sheet1", lineName+strconv.Itoa(hang), v2)
-			line++
+	defer resp.Body.Close()
+	buf := make([]byte, 10000)
+	for {
+		n, _ := resp.Body.Read(buf)
+		if 0 == n {
+			break
 		}
 	}
-	fileName := time.Unix(futureStamp, 0).Format("2006年1月2日15时4分5秒") + "至" + time.Unix(nowStamp, 0).Format("2006年1月2日15时4分5秒")
-	err := xlsx.SaveAs(fileName + ".xlsx")
-	if err != nil {
-		fmt.Println(err)
-	}
+	var jsonStr lightGoJson.LightJsonByte
+	jsonStr = buf
+	jsonMap := jsonStr.LightDecode()
+	fmt.Println(jsonMap)
 }
+
 func main() {
 	fmt.Println("爬虫正在努力爬取，行走速度可能较慢~")
 	//获取待搜查帖子的时间戳
 	nowStamp = time.Now().Unix()
-	futureStamp = nowStamp - int64(3600*24*searchDay)
+	pastStamp = nowStamp - int64(3600*24*searchDay)
 	result = make(map[string][]string)
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 1; i++ {
 		wg.Add(1)
 		seachUrl := fmt.Sprintf("http://blockgeek.org/latest?no_definitions=true&no_subcategories=false&page=%d", i)
-		go search(seachUrl, func(dom *goquery.Document) {
-			dom.Find(".topic-list-item").Each(func(i int, subDom *goquery.Selection) {
-				//获取每个帖子的时间戳
-				invitationTimeStr, _ := subDom.Find("td .post-activity .relative-date").Attr("data-time")
-				invitationTimestamp, _ := strconv.Atoi(invitationTimeStr)
-				//是7天前的帖子
-				if int64(invitationTimestamp/1000) > futureStamp {
-					//帖子id
-					invitationId, _ := subDom.Attr("data-topic-id")
-					//帖子标题
-					if result[invitationId] == nil {
-						result[invitationId] = make([]string, 6)
-					}
-					result[invitationId][0] = subDom.Find("td .link-top-line .title").Text()
-					result[invitationId][1] = subDom.Find(".category .category-name").Text()
-					result[invitationId][2] = time.Unix(int64(invitationTimestamp/1000), 0).Format("2006-01-02 15:04:05")
-					result[invitationId][3], _ = subDom.Find(".posters a").Attr("data-user-card")
-					result[invitationId][4] = "懒，咕咕咕"
-					result[invitationId][5] = "http://blockgeek.org/t/topic/" + invitationId
-				}
-			})
-		})
+		go getInvitation(seachUrl, i)
 	}
 	wg.Wait()
-	saveToExecl(result)
+	fmt.Println(result)
 }

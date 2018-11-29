@@ -14,9 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lightbrotherV/lightGoJson"
-
 	"github.com/PuerkitoBio/goquery"
+	simplejson "github.com/bitly/go-simplejson"
 )
 
 const (
@@ -29,7 +28,7 @@ var userResult map[string]map[string]string //保持用户数据
 
 var wg sync.WaitGroup //定义一个同步等待的组
 
-var searchDay int = 7
+var searchDay float32 = 7
 
 var pastStamp, nowStamp int64 //待搜查以及现在的时间戳
 
@@ -59,7 +58,6 @@ func setPhantomjs(url string) {
 
 //抓包获取信息
 func search(url string, domDeal func(*goquery.Document)) {
-	defer wg.Done()
 	//生成运行的js文件
 	setPhantomjs(url)
 	defer os.Remove(md5Encode(url) + ".js")
@@ -119,6 +117,7 @@ func getInvitation(seachUrl string, i int) {
 			}
 		})
 	})
+	defer wg.Done()
 }
 
 //获取帖子用户名字
@@ -132,11 +131,12 @@ func getInvitationInfo(invitationId string) {
 			go getUserInfo(username, invitationId)
 		})
 	})
+	defer wg.Done()
 }
 
 //根据用户英文名查询用户信息
 func getUserInfo(username string, invitationId string) {
-	defer wg.Done()
+
 	resp, err := http.Get(fmt.Sprintf("http://blockgeek.org/u/%s.json", username))
 	if err != nil {
 		log.Fatal(err)
@@ -144,18 +144,31 @@ func getUserInfo(username string, invitationId string) {
 	if resp.StatusCode != http.StatusOK {
 		log.Fatal(resp.StatusCode)
 	}
-	defer resp.Body.Close()
-	buf := make([]byte, 10000)
+	buf := make([]byte, 50000)
 	for {
 		n, _ := resp.Body.Read(buf)
 		if 0 == n {
 			break
 		}
 	}
-	var jsonStr lightGoJson.LightJsonByte
-	jsonStr = buf
-	jsonMap := jsonStr.LightDecode()
-	fmt.Println(jsonMap)
+	jsonObj, _ := simplejson.NewJson(buf)
+	defer wg.Done()
+	defer resp.Body.Close()
+
+	if userResult[invitationId] == nil {
+		userResult[invitationId] = make(map[string]string)
+	}
+	userResult[invitationId]["author"] = username
+	var name, wallet string
+	if jsonObj != nil {
+		if _, ok := jsonObj.CheckGet("user"); ok {
+			if _, ok := jsonObj.Get("user").CheckGet("name"); ok {
+				name, _ = jsonObj.Get("user").Get("name").String()
+			}
+			wallet, _ = jsonObj.Get("user").Get("user_fields").Get("1").String()
+		}
+	}
+	userResult[invitationId][username] = fmt.Sprintf("中文名：%s\n英文名：%s\n钱包地址：%s\n\n", name, username, wallet)
 }
 
 func main() {
@@ -163,12 +176,14 @@ func main() {
 	//获取待搜查帖子的时间戳
 	nowStamp = time.Now().Unix()
 	pastStamp = nowStamp - int64(3600*24*searchDay)
+	// pastStamp = nowStamp - int64(3600*2)
 	result = make(map[string][]string)
+	userResult = make(map[string]map[string]string)
 	for i := 0; i < 1; i++ {
 		wg.Add(1)
 		seachUrl := fmt.Sprintf("http://blockgeek.org/latest?no_definitions=true&no_subcategories=false&page=%d", i)
 		go getInvitation(seachUrl, i)
 	}
 	wg.Wait()
-	fmt.Println(result)
+	fmt.Println(userResult)
 }
